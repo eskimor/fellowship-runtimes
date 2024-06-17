@@ -184,6 +184,7 @@ Note: This release only affects the following runtimes and is not a full system 
 - Allow any parachain to have bidirectional channel with any system parachains ([polkadot-fellows/runtimes#329](https://github.com/polkadot-fellows/runtimes/pull/329))
 - Update price controller of broker pallet to use higher leadin, without adjusting the minimum price too much ([polkadot-fellows/runtimes#334](https://github.com/polkadot-fellows/runtimes/pull/334))
 - Enable support for new hardware signers like the generic ledger app ([polkadot-fellows/runtimes#337](https://github.com/polkadot-fellows/runtimes/pull/337))
+- Enable Agile Coretime on Polkadot ([polkadot-fellows/runtimes#322](https://github.com/polkadot-fellows/runtimes/pull/322))
 
 ### Changed
 
