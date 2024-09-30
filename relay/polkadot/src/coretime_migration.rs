@@ -274,25 +274,25 @@ fn migrate_send_assignments_to_coretime_chain<
 
 
 			let time_slice_wrong = (valid_until_wrong + TIMESLICE_PERIOD - 1) / TIMESLICE_PERIOD;
-            let valid_until = valid_until_wrong + offset;
+			let valid_until = valid_until_wrong + offset;
 			let time_slice = (valid_until + TIMESLICE_PERIOD - 1) / TIMESLICE_PERIOD;
 
 
-            let para_info = ParaInfo {
-                para_id: p.into(),
-                lease_until_block: valid_until,
-                lease_until_time_slice: time_slice,
-            };
+			let para_info = ParaInfo {
+				para_id: p.into(),
+				lease_until_block: valid_until,
+				lease_until_time_slice: time_slice,
+			};
 
-            all_paras.push(para_info.clone());
+			all_paras.push(para_info.clone());
 
-            if valid_until_wrong <= migration_block {
-                paras_dropped.push(para_info);
-            } else if time_slice_wrong < region_end {
-                paras_invalid_renewed.push(para_info);
-            } else {
-                paras_rem.push(para_info);
-            }
+			if valid_until_wrong <= migration_block {
+				paras_dropped.push(para_info);
+			} else if time_slice_wrong < region_end {
+				paras_invalid_renewed.push(para_info);
+			} else {
+				paras_rem.push(para_info);
+			}
 			log::trace!(target: "coretime-migration", "Sending of lease holding para {:?}, valid_until: {:?}, time_slice: {:?}", p, valid_until, time_slice);
 			Some(mk_coretime_call::<T>(CoretimeCalls::SetLease(p.into(), time_slice)))
 		});
