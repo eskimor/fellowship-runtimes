@@ -17,10 +17,7 @@
 //! Coretime migration for Polkadot runtime
 
 use crate::{
-	coretime::{Config, WeightInfo},
-	parachains_assigner_coretime,
-	parachains_assigner_coretime::PartsOf57600,
-	OriginKind,
+	coretime::{Config, WeightInfo}, parachains_assigner_coretime::{self, PartsOf57600}, LeaseOffset, OriginKind
 };
 use codec::{Decode, Encode};
 use core::{iter, result};
@@ -85,6 +82,7 @@ impl<T: Config, SendXcm: xcm::v4::SendXcm, LegacyLease: GetLegacyLease<BlockNumb
 	MigrateToCoretime<T, SendXcm, LegacyLease>
 {
 	fn already_migrated() -> bool {
+        return false;
 		// We are using the assigner coretime because the coretime pallet doesn't has any
 		// storage data. But both pallets are introduced at the same time, so this is fine.
 		let name_hash = parachains_assigner_coretime::Pallet::<T>::name_hash();
@@ -211,6 +209,21 @@ fn migrate_to_coretime<
 		.saturating_add(T::DbWeight::get().reads_writes(2, 1))
 }
 
+#[derive(Debug, Clone)]
+struct ParaInfo {
+    para_id: ParaId,
+    lease_until_block: u32,
+    lease_until_time_slice: u32,
+}
+
+impl ParaInfo {
+    fn print(&self) {
+        log::debug!(target: "coretime-migration", "{:?}: para_id", self.para_id);
+        log::debug!(target: "coretime-migration", "{:?}: lease_until_block", self.lease_until_block);
+        log::debug!(target: "coretime-migration", "{:?}: lease_until_time_slice\n", self.lease_until_time_slice);
+    }
+}
+
 fn migrate_send_assignments_to_coretime_chain<
 	T: Config,
 	SendXcm: xcm::v4::SendXcm,
@@ -229,6 +242,20 @@ fn migrate_send_assignments_to_coretime_chain<
 		mk_coretime_call::<T>(CoretimeCalls::Reserve(schedule))
 	});
 
+    let end_lp_17 = 22694400;
+    let end_lp_18 = 23904000;
+    let region_end = 292_605;
+    // Actual relevant value might be one or two blocks after.
+    let migration_block = 22_572_435;
+
+    let mut paras_dropped = Vec::new();
+    let mut paras_invalid_renewed = Vec::new();
+    let mut paras_rem = Vec::new();
+    let mut all_paras = Vec::new();
+
+    let offset = LeaseOffset::get();
+
+
 	let mut leases = lease_holding.into_iter().filter_map(|p| {
 			log::trace!(target: "coretime-migration", "Preparing sending of lease holding para {:?}", p);
 			let Some(valid_until) = LegacyLease::get_parachain_lease_in_blocks(p) else {
@@ -236,7 +263,7 @@ fn migrate_send_assignments_to_coretime_chain<
 				return None
 			};
 
-			let valid_until: u32 = match valid_until.try_into() {
+			let valid_until_wrong: u32 = match valid_until.try_into() {
 				Ok(val) => val,
 				Err(_) => {
 					log::error!("Converting block number to u32 failed!");
@@ -244,7 +271,27 @@ fn migrate_send_assignments_to_coretime_chain<
 				},
 			};
 
+
+			let time_slice_wrong = (valid_until_wrong + TIMESLICE_PERIOD - 1) / TIMESLICE_PERIOD;
+            let valid_until = valid_until_wrong + offset;
 			let time_slice = (valid_until + TIMESLICE_PERIOD - 1) / TIMESLICE_PERIOD;
+
+
+            let para_info = ParaInfo {
+                para_id: p.into(),
+                lease_until_block: valid_until,
+                lease_until_time_slice: time_slice,
+            };
+
+            all_paras.push(para_info.clone());
+
+            if valid_until_wrong <= migration_block {
+                paras_dropped.push(para_info);
+            } else if time_slice_wrong < region_end {
+                paras_invalid_renewed.push(para_info);
+            } else {
+                paras_rem.push(para_info);
+            }
 			log::trace!(target: "coretime-migration", "Sending of lease holding para {:?}, valid_until: {:?}, time_slice: {:?}", p, valid_until, time_slice);
 			Some(mk_coretime_call::<T>(CoretimeCalls::SetLease(p.into(), time_slice)))
 		});
@@ -298,6 +345,30 @@ fn migrate_send_assignments_to_coretime_chain<
 			Xcm(set_core_count_content),
 		]
 	};
+
+    log::debug!(target: "coretime-migration", "Paras dropped - need to be inserted + renewal:\n");
+    for p in paras_dropped {
+        // p.print()
+        log::debug!(target: "coretime-migration", "({:?}, {:?})", p.para_id, p.lease_until_time_slice);
+    }
+
+    log::debug!(target: "coretime-migration", "Paras with to be removed renewals:\n");
+    for p in paras_invalid_renewed {
+        // p.print()
+        log::debug!(target: "coretime-migration", "({:?}, {:?})", p.para_id, p.lease_until_time_slice);
+    }
+
+    log::debug!(target: "coretime-migration", "Paras just being short:\n");
+    for p in paras_rem {
+        // p.print()
+        log::debug!(target: "coretime-migration", "({:?}, {:?})", p.para_id, p.lease_until_time_slice);
+    }
+
+    log::debug!(target: "coretime-migration", "All paras:\n");
+    all_paras.sort_by(|a, b| a.lease_until_time_slice.cmp(&b.lease_until_time_slice));
+    for p in all_paras {
+        log::debug!(target: "coretime-migration", "({:?}, {:?})", p.para_id, p.lease_until_time_slice);
+    }
 
 	for message in messages {
 		send_xcm::<SendXcm>(Location::new(0, Junction::Parachain(T::BrokerId::get())), message)?;
